@@ -12,22 +12,77 @@ import java.util.Base64;
 import java.util.Date;
 
 /**
- * 登录验证状态码管理类
- * 提供生成和解析包含uid和时间戳的加密状态码的静态方法
+ * 登录验证状态码管理工具类
+ *
+ * 此工具类提供用户会话状态码的生成、解析和验证功能。状态码是一个包含用户 uid 和时间戳的
+ * AES 加密字符串，用于验证用户身份和管理会话有效期。
+ *
+ * 核心功能：
+ * 1. 生成状态码：根据 uid 和当前时间戳生成加密状态码
+ * 2. 解析状态码：从加密状态码中提取 uid 和生成时间
+ * 3. 校验状态码：验证 uid 匹配、时间未过期，并生成新状态码
+ *
+ * 安全特性：
+ * - 使用 AES-128-CBC 加密算法，确保状态码内容安全
+ * - 使用 Base64 编码，便于在 HTTP 请求中传输
+ * - 有效期为 1 小时，自动过期机制确保会话安全
+ * - 每次验证通过后生成新的状态码，防止状态码重用
+ *
+ * 使用示例：
+ * <pre>
+ * // 1. 用户注册时生成状态码
+ * String statusCode = StatusCodeManager.generateStatusCode(userId);
+ *
+ * // 2. 用户请求时验证状态码
+ * String newStatusCode = StatusCodeManager.checkStatusCode(statusCode, userId);
+ *
+ * // 3. 调试时解析状态码（获取 uid 和生成时间）
+ * StatusInfo info = StatusCodeManager.parseStatusCode(statusCode);
+ * </pre>
+ *
+ * @author Muimi272
+ * @version 1.0
+ * @since 2026-02-22
  */
 public class StatusCodeManager {
     private static final Logger logger = LoggerFactory.getLogger(StatusCodeManager.class);
 
-    // AES加密密钥（必须是16位，建议替换为环境变量/配置文件读取）
+    /**
+     * AES加密密钥（16位）
+     *
+     * 用于 AES-128 算法的加密和解密。建议在生产环境中使用环境变量或配置文件读取，
+     * 而不是硬编码在代码中。
+     */
     private static final String AES_KEY = "KisphaAESKeyCode";
-    // AES偏移量（必须是16位，建议替换）
+
+    /**
+     * AES初始化向量（16位）
+     *
+     * 用于 AES-CBC 模式的加密和解密。建议在生产环境中使用环境变量或配置文件读取。
+     */
     private static final String AES_IV = "Muimi_KisphaCode";
-    // 分隔符，用于拼接uid和时间戳
+
+    /**
+     * uid 和时间戳的分隔符
+     *
+     * 在未加密的原文中用于分隔 uid 和时间戳，格式为：uid|timestamp
+     */
     private static final String SEPARATOR = "\\|";
-    // 状态码有效期（毫秒）：1小时
+
+    /**
+     * 状态码有效期（毫秒）
+     *
+     * 状态码生成后的有效时间。此值为 3600000 毫秒 = 1 小时。
+     * 超过此时间的状态码将被视为过期，验证失败。
+     */
     private static final long VALID_PERIOD = 60 * 60 * 1000L;
 
-    // 静态代码块：校验密钥/偏移量长度（避免隐性错误）
+    /**
+     * 静态初始化块：校验 AES 密钥和初始化向量的长度
+     *
+     * 此块在类加载时执行，确保密钥和向量的长度为 16 字节，符合 AES-128 的要求。
+     * 如果长度不符，将抛出 RuntimeException，防止在运行时出现加密失败。
+     */
     static {
         if (AES_KEY.getBytes(StandardCharsets.UTF_8).length != 16) {
             String errorMsg = "AES_KEY必须是16位字符串！当前长度：" + AES_KEY.length();
@@ -145,7 +200,19 @@ public class StatusCodeManager {
     }
 
     /**
-     * AES加密核心方法
+     * AES 加密核心方法
+     *
+     * 使用 AES-128-CBC 模式加密内容。
+     *
+     * 加密过程：
+     * 1. 初始化 SecretKeySpec（使用 AES_KEY 生成 128 位密钥）
+     * 2. 初始化 IvParameterSpec（使用 AES_IV 作为初始化向量）
+     * 3. 创建 Cipher 实例并初始化为加密模式
+     * 4. 执行加密操作并返回密文字节数组
+     *
+     * @param content 待加密的原文字节数组
+     * @return 加密后的密文字节数组
+     * @throws Exception 加密过程中可能抛出的异常（如密钥无效、加密失败等）
      */
     private static byte[] aesEncrypt(byte[] content) throws Exception {
         SecretKeySpec keySpec = new SecretKeySpec(AES_KEY.getBytes(StandardCharsets.UTF_8), "AES");
@@ -156,7 +223,19 @@ public class StatusCodeManager {
     }
 
     /**
-     * AES解密核心方法
+     * AES 解密核心方法
+     *
+     * 使用 AES-128-CBC 模式解密内容。
+     *
+     * 解密过程：
+     * 1. 初始化 SecretKeySpec（使用 AES_KEY 生成 128 位密钥）
+     * 2. 初始化 IvParameterSpec（使用 AES_IV 作为初始化向量）
+     * 3. 创建 Cipher 实例并初始化为解密模式
+     * 4. 执行解密操作并返回明文字节数组
+     *
+     * @param encryptedBytes 待解密的密文字节数组
+     * @return 解密后的明文字节数组
+     * @throws Exception 解密过程中可能抛出的异常（如密钥无效、数据格式错误等）
      */
     private static byte[] aesDecrypt(byte[] encryptedBytes) throws Exception {
         SecretKeySpec keySpec = new SecretKeySpec(AES_KEY.getBytes(StandardCharsets.UTF_8), "AES");
@@ -168,17 +247,58 @@ public class StatusCodeManager {
 
     /**
      * 状态码解析结果封装类
+     *
+     * 此类用于存储从加密状态码中解析出的信息。通过 parseStatusCode 方法获得。
+     *
+     * 包含的信息：
+     * - uid: 用户唯一标识
+     * - generateTime: 状态码生成时间（毫秒时间戳）
+     *
+     * 使用示例：
+     * <pre>
+     * String statusCode = "..."; // 加密的状态码字符串
+     * StatusInfo info = StatusCodeManager.parseStatusCode(statusCode);
+     * Long userId = info.getUid();
+     * long createdTime = info.getGenerateTime();
+     * </pre>
+     *
+     * @author Muimi272
+     * @version 1.0
+     * @since 2026-02-22
      */
     @Getter
     public static class StatusInfo {
-        private final Long uid;          // 用户ID
-        private final long generateTime; // 状态码生成时间（毫秒时间戳）
+        /**
+         * 用户唯一标识
+         */
+        private final Long uid;
 
+        /**
+         * 状态码生成时间（毫秒时间戳）
+         *
+         * 用于计算状态码是否过期。当前时间与此时间戳的差值超过 VALID_PERIOD 时，
+         * 状态码将被视为过期。
+         */
+        private final long generateTime;
+
+        /**
+         * 构造方法
+         *
+         * @param uid 用户唯一标识
+         * @param generateTime 状态码生成时间（毫秒时间戳）
+         */
         public StatusInfo(Long uid, long generateTime) {
             this.uid = uid;
             this.generateTime = generateTime;
         }
 
+        /**
+         * 返回 StatusInfo 的字符串表示
+         *
+         * 格式：StatusInfo{uid=xxx, generateTime=xxx(日期格式)}
+         *
+         * @return 包含 uid、时间戳和格式化日期的字符串
+         */
         @Override
         public String toString() {
             return "StatusInfo{" +
